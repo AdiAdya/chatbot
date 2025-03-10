@@ -1,77 +1,46 @@
+import OpenAI from 'openai';
 import { NextResponse } from 'next/server';
+import { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import { Message } from '@/app/services/types';
 
-interface Message {
-  text: string;
-  isUser: boolean;
-}
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
-function formatResponse(text: string): string {
-  // Convert HTML to markdown-style formatting
-  const formattedText = text
-    // Convert <br/> to actual newlines
-    .replace(/<br\/>/g, '\n')
-    // Convert <b> tags to markdown bold
-    .replace(/<b>(.*?)<\/b>/g, '**$1**')
-    // Trim any extra whitespace
-    .trim();
-
-  // Now convert back to our desired HTML format
-  return formattedText
-    // Convert markdown bold back to HTML bold
-    .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
-    // Convert single newlines to <br/>
-    .replace(/\n/g, '<br/>')
-    // Ensure bullet points have consistent spacing
-    .replace(/•\s+/g, '• ')
-    // Clean up any multiple consecutive <br/> tags
-    .replace(/(<br\/>){3,}/g, '<br/><br/>');
-}
-
-export async function POST(req: Request) {
+export async function POST(request: Request) {
   try {
-    const { messages }: { messages: Message[] } = await req.json();
-    console.log('Received messages:', messages);
+    const { messages } = await request.json();
 
-    const lastMessage = messages[messages.length - 1];
-    
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GOOGLE_API_KEY}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{ text: lastMessage.text }]
-          }]
-        })
-      }
-    );
+    const formattedMessages: ChatCompletionMessageParam[] = messages.map((msg: Message) => ({
+      role: msg.isUser ? "user" : "assistant",
+      content: msg.text
+    }));
 
-    if (!response.ok) {
-      const error = await response.json();
-      console.error('Full API error:', error);
-      throw new Error(error.error?.message || 'Failed to generate response');
-    }
-
-    const data = await response.json();
-    console.log('API Response:', data);
-
-    const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!generatedText) {
-      throw new Error('No response generated');
-    }
-
-    const formattedText = formatResponse(generatedText);
-
-    return NextResponse.json({ 
-      text: formattedText
+    formattedMessages.unshift({
+      role: "system",
+      content: "You are a helpful AI tutor. Provide clear, concise, and accurate responses. When answering follow-up questions, maintain context from previous messages."
     });
+    
+    const completion = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: formattedMessages,
+      temperature: 0.7,
+      max_tokens: 400
+    });
+
+    const generatedText = completion.choices[0]?.message?.content;
+    if (!generatedText) {
+      return NextResponse.json(
+        { error: 'No response generated' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ text: generatedText });
   } catch (error) {
-    console.error('Gemini API error:', error);
+    console.error('Error in chat API:', error);
     return NextResponse.json(
-      { error: 'There was an error processing your request: ' + (error as Error).message },
+      { error: 'Failed to generate response' },
       { status: 500 }
     );
   }

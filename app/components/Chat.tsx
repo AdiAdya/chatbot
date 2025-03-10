@@ -3,32 +3,26 @@
 import { useState, useRef, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-
-interface Message {
-  text: string;
-  isUser: boolean;
-}
-
-interface ChatHistoryItem {
-  id: string;
-  title: string;
-  messages: {
-    question: string;
-    answer: string;
-    timestamp: Date;
-  }[];
-  timestamp: Date;
-}
-
-const STORAGE_KEYS = {
-  CHAT_HISTORY: 'chat_history',
-  MESSAGE_COUNT: 'message_count'
-} as const;
+import Message from './Message';
+import ChatInput from './ChatInput';
+import ChatHistory from './ChatHistory';
+import UserProfile from './UserProfile';
+import LoadingIndicator from './LoadingIndicator';
+import { 
+  Message as MessageType, 
+  ChatHistoryItem, 
+  sendMessage,
+  saveChatHistory,
+  loadChatHistory,
+  saveMessageCount,
+  loadMessageCount,
+  clearStorage
+} from '../services/chatService';
 
 export default function Chat() {
   const { data: session } = useSession();
   const router = useRouter();
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<MessageType[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,38 +31,22 @@ export default function Chat() {
   const [hasReachedLimit, setHasReachedLimit] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [queryCount, setQueryCount] = useState(0);
-  const MESSAGE_LIMIT = 5;
-  const inputRef = useRef<HTMLInputElement>(null);
-  const chatContainerRef = useRef<HTMLDivElement>(null);
   const [showHeader, setShowHeader] = useState(true);
+  const MESSAGE_LIMIT = 5;
+  const chatContainerRef = useRef<HTMLDivElement>(null);
 
   // Load chat history and query count from localStorage on component mount
   useEffect(() => {
-    const savedHistory = localStorage.getItem(STORAGE_KEYS.CHAT_HISTORY);
-    const savedQueryCount = localStorage.getItem(STORAGE_KEYS.MESSAGE_COUNT);
+    const savedHistory = loadChatHistory();
+    const savedQueryCount = loadMessageCount();
     
     if (savedHistory) {
-      const parsedHistory = JSON.parse(savedHistory).map((item: Omit<ChatHistoryItem, 'timestamp'> & { 
-        timestamp: string;
-        messages: Array<{
-          question: string;
-          answer: string;
-          timestamp: string;
-        }>;
-      }) => ({
-        ...item,
-        timestamp: new Date(item.timestamp),
-        messages: item.messages.map(msg => ({
-          ...msg,
-          timestamp: new Date(msg.timestamp)
-        }))
-      }));
-      setChatHistory(parsedHistory);
+      setChatHistory(savedHistory);
     }
 
     if (savedQueryCount) {
-      setQueryCount(parseInt(savedQueryCount));
-      if (!session && parseInt(savedQueryCount) >= MESSAGE_LIMIT) {
+      setQueryCount(savedQueryCount);
+      if (!session && savedQueryCount >= MESSAGE_LIMIT) {
         setHasReachedLimit(true);
       }
     }
@@ -76,7 +54,7 @@ export default function Chat() {
 
   // Save query count to localStorage whenever it changes
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.MESSAGE_COUNT, queryCount.toString());
+    saveMessageCount(queryCount);
   }, [queryCount]);
 
   // Update hasReachedLimit when session changes or query count updates
@@ -84,30 +62,15 @@ export default function Chat() {
     if (session) {
       setHasReachedLimit(false);
       // Load chat history from localStorage when signing in
-      const savedHistory = localStorage.getItem(STORAGE_KEYS.CHAT_HISTORY);
+      const savedHistory = loadChatHistory();
       if (savedHistory) {
         try {
-          const parsedHistory = JSON.parse(savedHistory).map((item: Omit<ChatHistoryItem, 'timestamp'> & { 
-            timestamp: string;
-            messages: Array<{
-              question: string;
-              answer: string;
-              timestamp: string;
-            }>;
-          }) => ({
-            ...item,
-            timestamp: new Date(item.timestamp),
-            messages: item.messages.map(msg => ({
-              ...msg,
-              timestamp: new Date(msg.timestamp)
-            }))
-          }));
-          setChatHistory(parsedHistory);
+          setChatHistory(savedHistory);
           
           // If there's a selected chat, load its messages
-          if (selectedChatIndex !== null && parsedHistory[selectedChatIndex]) {
-            const selectedChat = parsedHistory[selectedChatIndex];
-            const threadMessages: Message[] = selectedChat.messages.flatMap((msg: { question: string; answer: string; timestamp: Date }) => [
+          if (selectedChatIndex !== null && savedHistory[selectedChatIndex]) {
+            const selectedChat = savedHistory[selectedChatIndex];
+            const threadMessages: MessageType[] = selectedChat.messages.flatMap(msg => [
               { text: msg.question, isUser: true },
               { text: msg.answer, isUser: false }
             ]);
@@ -124,17 +87,8 @@ export default function Chat() {
 
   // Save chat history to localStorage whenever it changes
   useEffect(() => {
-    if (chatHistory.length > 0) {
-      localStorage.setItem(STORAGE_KEYS.CHAT_HISTORY, JSON.stringify(chatHistory));
-    }
+    saveChatHistory(chatHistory);
   }, [chatHistory]);
-
-  // Focus input after loading completes
-  useEffect(() => {
-    if (!isLoading) {
-      inputRef.current?.focus();
-    }
-  }, [isLoading]);
 
   // Update showHeader when messages change
   useEffect(() => {
@@ -162,38 +116,15 @@ export default function Chat() {
       return;
     }
 
-    const userMessage: Message = { text: input, isUser: true };
+    const userMessage: MessageType = { text: input, isUser: true };
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
     setError(null);
 
     try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messages: [...messages, userMessage],
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to get response');
-      }
-
-      if (!data.text) {
-        throw new Error('No response received from the AI');
-      }
-
-      const aiMessage: Message = {
-        text: data.text,
-        isUser: false,
-      };
-
+      const response = await sendMessage([...messages, userMessage]);
+      const aiMessage: MessageType = { text: response, isUser: false };
       setMessages(prev => [...prev, aiMessage]);
       setQueryCount(prev => prev + 1);
 
@@ -201,7 +132,7 @@ export default function Chat() {
       setChatHistory(prev => {
         const newMessage = {
           question: input,
-          answer: data.text,
+          answer: response,
           timestamp: new Date()
         };
 
@@ -268,7 +199,7 @@ export default function Chat() {
   const handleHistoryClick = (item: ChatHistoryItem, index: number) => {
     setSelectedChatIndex(index);
     // Load all messages from the selected thread
-    const threadMessages: Message[] = item.messages.flatMap(msg => [
+    const threadMessages: MessageType[] = item.messages.flatMap(msg => [
       { text: msg.question, isUser: true },
       { text: msg.answer, isUser: false }
     ]);
@@ -283,8 +214,6 @@ export default function Chat() {
     
     // Close sidebar on mobile when chat is selected
     setIsSidebarOpen(false);
-    // Focus input after clicking history item
-    inputRef.current?.focus();
   };
 
   const clearChat = () => {
@@ -303,9 +232,7 @@ export default function Chat() {
   };
 
   const handleSignOut = async () => {
-    // Clear both message count and chat history from localStorage
-    localStorage.removeItem(STORAGE_KEYS.MESSAGE_COUNT);
-    localStorage.removeItem(STORAGE_KEYS.CHAT_HISTORY);
+    clearStorage();
     setQueryCount(0);
     setHasReachedLimit(false);
     setChatHistory([]);
@@ -316,153 +243,17 @@ export default function Chat() {
 
   return (
     <div className="flex h-screen relative bg-gray-50 p-4">
-      {/* Mobile Sidebar Toggle Button */}
-      <button
-        onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-        className={`lg:hidden fixed top-4 left-4 z-50 p-2 bg-white rounded-lg shadow-lg transition-opacity duration-300 ${
-          isSidebarOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'
-        }`}
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          fill="none"
-          viewBox="0 0 24 24"
-          strokeWidth={1.5}
-          stroke="currentColor"
-          className="w-6 h-6 text-[#0a1172]"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
-          />
-        </svg>
-      </button>
-
-      {/* Query History Sidebar */}
-      <div 
-        className={`
-          fixed lg:relative w-80 h-full
-          transition-transform duration-300 ease-in-out z-40 flex flex-col
-          mr-4 p-4 gap-4
-          ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-        `}
-      >
-        {/* User Profile Section */}
-        <div>
-          {session ? (
-            <div className="flex items-center justify-between bg-white rounded-3xl border border-gray-100 p-4 shadow-sm">
-              <div className="flex items-center gap-2">
-                {session.user?.image && (
-                  <img
-                    src={session.user.image}
-                    alt={session.user.name || 'User'}
-                    className="w-8 h-8 rounded-full"
-                  />
-                )}
-                <span className="text-sm font-medium text-gray-700">
-                  {session.user?.name}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleSignOut}
-                  className="text-sm text-gray-500 hover:text-gray-700"
-                >
-                  Sign Out
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              onClick={() => router.push('/login')}
-              className="w-full bg-[#0a1172] text-white rounded-full py-3 px-4 hover:bg-[#0a1172]/90 transition-colors shadow-sm"
-            >
-              Sign In
-            </button>
-          )}
-        </div>
-
-        {/* Scrollable Chat History */}
-        <div className="flex-1 bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
-          <div className="h-full overflow-y-auto">
-            <div className="p-4 space-y-3">
-              {chatHistory.length === 0 ? (
-                <div className="text-gray-500 text-center py-8">
-                  You will see recent chats here
-                </div>
-              ) : (
-                chatHistory.map((item, index) => {
-                  const isSelected = index === selectedChatIndex;
-                  return (
-                    <div
-                      key={index}
-                      onClick={() => handleHistoryClick(item, index)}
-                      className={`p-3 rounded-2xl cursor-pointer transition-all flex justify-between items-center ${
-                        isSelected 
-                          ? 'bg-[#0a1172] shadow-md'
-                          : 'bg-white hover:bg-gray-50'
-                      }`}
-                    >
-                      <div className={`text-[15px] font-medium line-clamp-2 flex-1 ${
-                        isSelected ? 'text-white' : 'text-[#1a1a1a]'
-                      }`}>
-                        {item.title}
-                      </div>
-                      {isSelected && (
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          fill="currentColor"
-                          className="w-6 h-6 ml-2 flex-shrink-0 text-white"
-                        >
-                          <path
-                            fillRule="evenodd"
-                            d="M16.28 11.47a.75.75 0 010 1.06l-7.5 7.5a.75.75 0 01-1.06-1.06L14.69 12 7.72 5.03a.75.75 0 011.06-1.06l7.5 7.5z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Fixed Bottom Button */}
-        <div>
-          <button
-            onClick={clearChat}
-            className="w-full bg-[#0a1172] text-white rounded-full py-3 px-4 flex items-center justify-center gap-2 hover:bg-[#0a1172]/90 transition-colors shadow-sm"
-          >
-            <span>Start a New Chat</span>
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              strokeWidth={2}
-              stroke="currentColor"
-              className="w-5 h-5"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"
-              />
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      {/* Overlay for mobile */}
-      {isSidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-50 z-30 lg:hidden"
-          onClick={() => setIsSidebarOpen(false)}
+      <div className="flex flex-col gap-4">
+        <UserProfile session={session} onSignOut={handleSignOut} />
+        <ChatHistory
+          history={chatHistory}
+          selectedIndex={selectedChatIndex}
+          onSelect={handleHistoryClick}
+          onNewChat={clearChat}
+          isSidebarOpen={isSidebarOpen}
+          setIsSidebarOpen={setIsSidebarOpen}
         />
-      )}
+      </div>
 
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col bg-white rounded-3xl overflow-hidden">
@@ -483,41 +274,13 @@ export default function Chat() {
                 </h1>
               </div>
 
-              <form onSubmit={handleSubmit} className="w-full max-w-2xl px-4">
-                <div className="relative">
-                  <input
-                    ref={inputRef}
-                    type="text"
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    placeholder={hasReachedLimit ? "Please upgrade to continue chatting" : "What can I help you with today?"}
-                    className="w-full px-6 py-4 rounded-full border border-gray-200 focus:outline-none focus:border-[#0a1172] pr-12 text-[#0a1172] placeholder-gray-400 shadow-sm"
-                    disabled={isLoading || hasReachedLimit}
-                  />
-                  <button
-                    type="submit"
-                    className={`absolute right-3 top-1/2 -translate-y-1/2 p-2 ${
-                      isLoading ? 'text-gray-400' : 'text-[#0a1172] hover:text-[#0a1172]/80'
-                    }`}
-                    disabled={isLoading || hasReachedLimit}
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      strokeWidth={2}
-                      stroke="currentColor"
-                      className="w-6 h-6"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              </form>
+              <ChatInput
+                input={input}
+                setInput={setInput}
+                onSubmit={handleSubmit}
+                isLoading={isLoading}
+                hasReachedLimit={hasReachedLimit}
+              />
             </div>
           </div>
         )}
@@ -541,35 +304,9 @@ export default function Chat() {
             ) : (
               <div className="space-y-6">
                 {messages.map((message, index) => (
-                  <div
-                    key={index}
-                    className={`flex ${message.isUser ? 'justify-end' : 'justify-start'}`}
-                  >
-                    <div
-                      className={`max-w-[80%] rounded-2xl px-8 py-4 ${
-                        message.isUser
-                          ? 'bg-[#0a1172] text-white'
-                          : 'bg-white border border-gray-200 text-[#0a1172]'
-                      }`}
-                    >
-                      <div 
-                        className="space-y-2"
-                        dangerouslySetInnerHTML={{ __html: message.text }} 
-                      />
-                    </div>
-                  </div>
+                  <Message key={index} message={message} />
                 ))}
-                {isLoading && (
-                  <div className="flex justify-start">
-                    <div className="max-w-[80%] rounded-2xl px-6 py-3 bg-white border border-gray-200">
-                      <div className="flex items-center space-x-2">
-                        <div className="w-2 h-2 bg-[#0a1172] rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                        <div className="w-2 h-2 bg-[#0a1172] rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                        <div className="w-2 h-2 bg-[#0a1172] rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                      </div>
-                    </div>
-                  </div>
-                )}
+                {isLoading && <LoadingIndicator />}
               </div>
             )}
           </div>
@@ -599,41 +336,13 @@ export default function Chat() {
 
         {!showHeader && (
           <div className="border-t border-gray-200 p-4">
-            <form onSubmit={handleSubmit} className="w-full">
-              <div className="relative max-w-4xl mx-auto">
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder={hasReachedLimit ? "Please upgrade to continue chatting" : "What can I help you with today?"}
-                  className="w-full px-6 py-4 rounded-full border border-gray-200 focus:outline-none focus:border-[#0a1172] pr-12 text-[#0a1172] placeholder-gray-400 shadow-sm"
-                  disabled={isLoading || hasReachedLimit}
-                />
-                <button
-                  type="submit"
-                  className={`absolute right-3 top-1/2 -translate-y-1/2 p-2 ${
-                    isLoading ? 'text-gray-400' : 'text-[#0a1172] hover:text-[#0a1172]/80'
-                  }`}
-                  disabled={isLoading || hasReachedLimit}
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    strokeWidth={2}
-                    stroke="currentColor"
-                    className="w-6 h-6"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"
-                    />
-                  </svg>
-                </button>
-              </div>
-            </form>
+            <ChatInput
+              input={input}
+              setInput={setInput}
+              onSubmit={handleSubmit}
+              isLoading={isLoading}
+              hasReachedLimit={hasReachedLimit}
+            />
           </div>
         )}
       </div>
