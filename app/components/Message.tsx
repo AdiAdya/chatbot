@@ -1,4 +1,4 @@
-import { Message as MessageType } from '../services/chatService';
+import { Message as MessageType } from '../services/types';
 
 interface MessageProps {
   message: MessageType;

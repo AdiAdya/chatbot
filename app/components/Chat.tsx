@@ -8,8 +8,8 @@ import ChatInput from './ChatInput';
 import ChatHistory from './ChatHistory';
 import UserProfile from './UserProfile';
 import LoadingIndicator from './LoadingIndicator';
+import { Message as MessageType } from '../services/types';
 import { 
-  Message as MessageType, 
   ChatHistoryItem, 
   sendMessage,
   saveChatHistory,

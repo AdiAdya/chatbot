@@ -1,4 +1,5 @@
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { Session } from 'next-auth';
 
 interface UserProfileProps {
@@ -15,10 +16,12 @@ export default function UserProfile({ session, onSignOut }: UserProfileProps) {
         <div className="flex items-center justify-between bg-white rounded-3xl border border-gray-100 p-4 shadow-sm">
           <div className="flex items-center gap-2">
             {session.user?.image && (
-              <img
+              <Image
                 src={session.user.image}
                 alt={session.user.name || 'User'}
-                className="w-8 h-8 rounded-full"
+                width={32}
+                height={32}
+                className="rounded-full"
               />
             )}
             <span className="text-sm font-medium text-gray-700">
