@@ -19,6 +19,7 @@ export default function Login() {
         email,
         password,
         redirect: false,
+        callbackUrl: '/'
       });
 
       if (result?.error) {
@@ -26,8 +27,7 @@ export default function Login() {
         return;
       }
 
-      router.push('/');
-      router.refresh();
+      router.replace('/');
     } catch (err) {
       console.error('Login error:', err);
       setError('An error occurred. Please try again.');

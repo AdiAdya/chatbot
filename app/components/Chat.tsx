@@ -86,27 +86,48 @@ export default function Chat() {
       // Load chat history from localStorage when signing in
       const savedHistory = localStorage.getItem(STORAGE_KEYS.CHAT_HISTORY);
       if (savedHistory) {
-        const parsedHistory = JSON.parse(savedHistory).map((item: Omit<ChatHistoryItem, 'timestamp'> & { 
-          timestamp: string;
-          messages: Array<{
-            question: string;
-            answer: string;
+        try {
+          const parsedHistory = JSON.parse(savedHistory).map((item: Omit<ChatHistoryItem, 'timestamp'> & { 
             timestamp: string;
-          }>;
-        }) => ({
-          ...item,
-          timestamp: new Date(item.timestamp),
-          messages: item.messages.map(msg => ({
-            ...msg,
-            timestamp: new Date(msg.timestamp)
-          }))
-        }));
-        setChatHistory(parsedHistory);
+            messages: Array<{
+              question: string;
+              answer: string;
+              timestamp: string;
+            }>;
+          }) => ({
+            ...item,
+            timestamp: new Date(item.timestamp),
+            messages: item.messages.map(msg => ({
+              ...msg,
+              timestamp: new Date(msg.timestamp)
+            }))
+          }));
+          setChatHistory(parsedHistory);
+          
+          // If there's a selected chat, load its messages
+          if (selectedChatIndex !== null && parsedHistory[selectedChatIndex]) {
+            const selectedChat = parsedHistory[selectedChatIndex];
+            const threadMessages: Message[] = selectedChat.messages.flatMap((msg: { question: string; answer: string; timestamp: Date }) => [
+              { text: msg.question, isUser: true },
+              { text: msg.answer, isUser: false }
+            ]);
+            setMessages(threadMessages);
+          }
+        } catch (error) {
+          console.error('Error loading chat history:', error);
+        }
       }
     } else {
       setHasReachedLimit(queryCount >= MESSAGE_LIMIT);
     }
-  }, [session, queryCount, MESSAGE_LIMIT]);
+  }, [session, queryCount, MESSAGE_LIMIT, selectedChatIndex]);
+
+  // Save chat history to localStorage whenever it changes
+  useEffect(() => {
+    if (chatHistory.length > 0) {
+      localStorage.setItem(STORAGE_KEYS.CHAT_HISTORY, JSON.stringify(chatHistory));
+    }
+  }, [chatHistory]);
 
   // Focus input after loading completes
   useEffect(() => {
@@ -282,6 +303,14 @@ export default function Chat() {
   };
 
   const handleSignOut = async () => {
+    // Clear both message count and chat history from localStorage
+    localStorage.removeItem(STORAGE_KEYS.MESSAGE_COUNT);
+    localStorage.removeItem(STORAGE_KEYS.CHAT_HISTORY);
+    setQueryCount(0);
+    setHasReachedLimit(false);
+    setChatHistory([]);
+    setMessages([]);
+    setSelectedChatIndex(null);
     await signOut();
   };
 
