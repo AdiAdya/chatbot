@@ -1,4 +1,3 @@
-import { HfInference } from '@huggingface/inference';
 import { NextResponse } from 'next/server';
 
 interface Message {
@@ -6,42 +5,71 @@ interface Message {
   isUser: boolean;
 }
 
-const hf = new HfInference(process.env.HUGGING_FACE_API_KEY);
+function formatResponse(text: string): string {
+  // Convert HTML to markdown-style formatting
+  const formattedText = text
+    // Convert <br/> to actual newlines
+    .replace(/<br\/>/g, '\n')
+    // Convert <b> tags to markdown bold
+    .replace(/<b>(.*?)<\/b>/g, '**$1**')
+    // Trim any extra whitespace
+    .trim();
+
+  // Now convert back to our desired HTML format
+  return formattedText
+    // Convert markdown bold back to HTML bold
+    .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+    // Convert single newlines to <br/>
+    .replace(/\n/g, '<br/>')
+    // Ensure bullet points have consistent spacing
+    .replace(/•\s+/g, '• ')
+    // Clean up any multiple consecutive <br/> tags
+    .replace(/(<br\/>){3,}/g, '<br/><br/>');
+}
 
 export async function POST(req: Request) {
   try {
-    const { messages } = await req.json();
+    const { messages }: { messages: Message[] } = await req.json();
     console.log('Received messages:', messages);
+
+    const lastMessage = messages[messages.length - 1];
     
-    // Prepare the conversation history
-    const conversation = messages
-      .map((msg: Message) => `${msg.isUser ? 'User' : 'Assistant'}: ${msg.text}`)
-      .join('\n');
-    
-    console.log('Prepared prompt:', conversation);
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GOOGLE_API_KEY}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{ text: lastMessage.text }]
+          }]
+        })
+      }
+    );
 
-    const response = await hf.textGeneration({
-      model: 'google/flan-t5-base',  // Using a smaller, more reliable model
-      inputs: conversation,
-      parameters: {
-        max_new_tokens: 150,
-        temperature: 0.7,
-        top_k: 50,
-        num_return_sequences: 1,
-      },
-    });
+    if (!response.ok) {
+      const error = await response.json();
+      console.error('Full API error:', error);
+      throw new Error(error.error?.message || 'Failed to generate response');
+    }
 
-    console.log('API Response:', response);
+    const data = await response.json();
+    console.log('API Response:', data);
 
-    if (!response.generated_text) {
+    const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!generatedText) {
       throw new Error('No response generated');
     }
 
+    const formattedText = formatResponse(generatedText);
+
     return NextResponse.json({ 
-      text: response.generated_text.trim()
+      text: formattedText
     });
   } catch (error) {
-    console.error('Detailed Hugging Face API error:', error);
+    console.error('Gemini API error:', error);
     return NextResponse.json(
       { error: 'There was an error processing your request: ' + (error as Error).message },
       { status: 500 }

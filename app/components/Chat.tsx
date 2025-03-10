@@ -10,8 +10,13 @@ interface Message {
 }
 
 interface ChatHistoryItem {
-  question: string;
-  answer: string;
+  id: string;
+  title: string;
+  messages: {
+    question: string;
+    answer: string;
+    timestamp: Date;
+  }[];
   timestamp: Date;
 }
 
@@ -31,42 +36,77 @@ export default function Chat() {
   const [selectedChatIndex, setSelectedChatIndex] = useState<number | null>(null);
   const [hasReachedLimit, setHasReachedLimit] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [queryCount, setQueryCount] = useState(0);
   const MESSAGE_LIMIT = 5;
   const inputRef = useRef<HTMLInputElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
   const [showHeader, setShowHeader] = useState(true);
 
-  // Load chat history from localStorage on component mount
+  // Load chat history and query count from localStorage on component mount
   useEffect(() => {
     const savedHistory = localStorage.getItem(STORAGE_KEYS.CHAT_HISTORY);
+    const savedQueryCount = localStorage.getItem(STORAGE_KEYS.MESSAGE_COUNT);
+    
     if (savedHistory) {
-      const parsedHistory = JSON.parse(savedHistory).map((item: Omit<ChatHistoryItem, 'timestamp'> & { timestamp: string }) => ({
+      const parsedHistory = JSON.parse(savedHistory).map((item: Omit<ChatHistoryItem, 'timestamp'> & { 
+        timestamp: string;
+        messages: Array<{
+          question: string;
+          answer: string;
+          timestamp: string;
+        }>;
+      }) => ({
         ...item,
-        timestamp: new Date(item.timestamp)
+        timestamp: new Date(item.timestamp),
+        messages: item.messages.map(msg => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp)
+        }))
       }));
       setChatHistory(parsedHistory);
-      
-      // Check message limit only for non-authenticated users
-      if (!session && parsedHistory.length >= MESSAGE_LIMIT) {
+    }
+
+    if (savedQueryCount) {
+      setQueryCount(parseInt(savedQueryCount));
+      if (!session && parseInt(savedQueryCount) >= MESSAGE_LIMIT) {
         setHasReachedLimit(true);
-      } else {
-        setHasReachedLimit(false);
       }
     }
-  }, []); // Remove session dependency
+  }, [session]);
 
-  // Update hasReachedLimit when session changes
+  // Save query count to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.MESSAGE_COUNT, queryCount.toString());
+  }, [queryCount]);
+
+  // Update hasReachedLimit when session changes or query count updates
   useEffect(() => {
     if (session) {
       setHasReachedLimit(false);
-    } else if (chatHistory.length >= MESSAGE_LIMIT) {
-      setHasReachedLimit(true);
+      // Load chat history from localStorage when signing in
+      const savedHistory = localStorage.getItem(STORAGE_KEYS.CHAT_HISTORY);
+      if (savedHistory) {
+        const parsedHistory = JSON.parse(savedHistory).map((item: Omit<ChatHistoryItem, 'timestamp'> & { 
+          timestamp: string;
+          messages: Array<{
+            question: string;
+            answer: string;
+            timestamp: string;
+          }>;
+        }) => ({
+          ...item,
+          timestamp: new Date(item.timestamp),
+          messages: item.messages.map(msg => ({
+            ...msg,
+            timestamp: new Date(msg.timestamp)
+          }))
+        }));
+        setChatHistory(parsedHistory);
+      }
+    } else {
+      setHasReachedLimit(queryCount >= MESSAGE_LIMIT);
     }
-  }, [session, chatHistory.length]);
-
-  // Save chat history to localStorage whenever it changes
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.CHAT_HISTORY, JSON.stringify(chatHistory));
-  }, [chatHistory]);
+  }, [session, queryCount, MESSAGE_LIMIT]);
 
   // Focus input after loading completes
   useEffect(() => {
@@ -84,15 +124,25 @@ export default function Chat() {
     }
   }, [messages]);
 
+  // Add scroll to bottom effect
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [messages, isLoading]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
 
-    // Check message limit for non-authenticated users
-    if (checkMessageLimit()) return;
+    // Check query limit for non-authenticated users
+    if (!session && queryCount >= MESSAGE_LIMIT) {
+      setHasReachedLimit(true);
+      return;
+    }
 
     const userMessage: Message = { text: input, isUser: true };
-    setMessages([userMessage]); // Only keep the current message
+    setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
     setError(null);
@@ -104,7 +154,7 @@ export default function Chat() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          messages: [userMessage],
+          messages: [...messages, userMessage],
         }),
       });
 
@@ -123,19 +173,69 @@ export default function Chat() {
         isUser: false,
       };
 
-      setMessages([userMessage, aiMessage]); // Show current Q&A pair
+      setMessages(prev => [...prev, aiMessage]);
+      setQueryCount(prev => prev + 1);
 
-      // Add to chat history and set as selected
+      // Update chat history
       setChatHistory(prev => {
-        const newHistory = [...prev, {
+        const newMessage = {
           question: input,
           answer: data.text,
           timestamp: new Date()
-        }];
-        // Set the index of the new chat as selected
-        setSelectedChatIndex(newHistory.length - 1);
-        return newHistory;
+        };
+
+        let updatedHistory;
+        // If there's no chat history, create first thread
+        if (prev.length === 0) {
+          updatedHistory = [{
+            id: Math.random().toString(36).substring(7),
+            title: input.slice(0, 50) + (input.length > 50 ? '...' : ''),
+            messages: [newMessage],
+            timestamp: new Date()
+          }];
+        }
+        // If we're starting fresh (selectedChatIndex is null), add to the last thread
+        else if (selectedChatIndex === null) {
+          updatedHistory = prev.map((chat, index) => 
+            index === prev.length - 1 ? {
+              ...chat,
+              messages: [...chat.messages, newMessage],
+              title: input.slice(0, 50) + (input.length > 50 ? '...' : ''),
+              timestamp: new Date()
+            } : chat
+          );
+        }
+        // Add to existing thread
+        else {
+          const currentChat = prev[selectedChatIndex];
+          if (!currentChat) {
+            // If selected chat doesn't exist, add to the last thread
+            updatedHistory = prev.map((chat, index) => 
+              index === prev.length - 1 ? {
+                ...chat,
+                messages: [...chat.messages, newMessage],
+                title: input.slice(0, 50) + (input.length > 50 ? '...' : ''),
+                timestamp: new Date()
+              } : chat
+            );
+          } else {
+            // Update the existing thread
+            updatedHistory = prev.map((chat, index) => 
+              index === selectedChatIndex ? {
+                ...chat,
+                messages: [...chat.messages, newMessage],
+                title: input.slice(0, 50) + (input.length > 50 ? '...' : ''),
+                timestamp: new Date()
+              } : chat
+            );
+          }
+        }
+
+        return updatedHistory;
       });
+
+      // Set the index of the current chat as selected
+      setSelectedChatIndex(chatHistory.length);
     } catch (error) {
       console.error('Error:', error);
       setError(error instanceof Error ? error.message : 'An unexpected error occurred');
@@ -146,10 +246,20 @@ export default function Chat() {
 
   const handleHistoryClick = (item: ChatHistoryItem, index: number) => {
     setSelectedChatIndex(index);
-    setMessages([
-      { text: item.question, isUser: true },
-      { text: item.answer, isUser: false }
+    // Load all messages from the selected thread
+    const threadMessages: Message[] = item.messages.flatMap(msg => [
+      { text: msg.question, isUser: true },
+      { text: msg.answer, isUser: false }
     ]);
+    setMessages(threadMessages);
+    
+    // Check if we've reached the limit based on the global query count
+    if (!session && queryCount >= MESSAGE_LIMIT) {
+      setHasReachedLimit(true);
+    } else {
+      setHasReachedLimit(false);
+    }
+    
     // Close sidebar on mobile when chat is selected
     setIsSidebarOpen(false);
     // Focus input after clicking history item
@@ -157,25 +267,22 @@ export default function Chat() {
   };
 
   const clearChat = () => {
+    if (!session && queryCount >= MESSAGE_LIMIT) return;
+    
     setMessages([]);
     setInput('');
     setSelectedChatIndex(null);
-    setChatHistory([]);
-    setHasReachedLimit(false);
-    localStorage.removeItem(STORAGE_KEYS.CHAT_HISTORY);
+    // Create a new thread when starting a new chat
+    setChatHistory(prev => [...prev, {
+      id: Math.random().toString(36).substring(7),
+      title: "New Chat",
+      messages: [],
+      timestamp: new Date()
+    }]);
   };
 
   const handleSignOut = async () => {
     await signOut();
-  };
-
-  // Check message limit only for non-authenticated users
-  const checkMessageLimit = () => {
-    if (!session && chatHistory.length >= MESSAGE_LIMIT) {
-      setHasReachedLimit(true);
-      return true;
-    }
-    return false;
   };
 
   return (
@@ -228,12 +335,14 @@ export default function Chat() {
                   {session.user?.name}
                 </span>
               </div>
-              <button
-                onClick={handleSignOut}
-                className="text-sm text-gray-500 hover:text-gray-700"
-              >
-                Sign Out
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleSignOut}
+                  className="text-sm text-gray-500 hover:text-gray-700"
+                >
+                  Sign Out
+                </button>
+              </div>
             </div>
           ) : (
             <button
@@ -269,7 +378,7 @@ export default function Chat() {
                       <div className={`text-[15px] font-medium line-clamp-2 flex-1 ${
                         isSelected ? 'text-white' : 'text-[#1a1a1a]'
                       }`}>
-                        {item.question}
+                        {item.title}
                       </div>
                       {isSelected && (
                         <svg
@@ -384,69 +493,78 @@ export default function Chat() {
           </div>
         )}
 
-        <div className={`
-          ${showHeader ? 'hidden' : 'flex-1 overflow-auto p-4'}
-        `}>
-          {hasReachedLimit && !session ? (
-            <div className="max-w-3xl mx-auto mt-8 rounded-2xl border border-orange-200 p-8">
-              <h2 className="text-2xl font-bold text-center text-[#1a237e] mb-4">
-                You&apos;ve reached {MESSAGE_LIMIT}-message limit!
-              </h2>
-              <p className="text-center text-gray-700 mb-6">
-                Sign in for unlimited AI chat and get answers to all your study questions. 🚀
-              </p>
-              <div className="flex justify-center">
-                <button
-                  onClick={() => router.push('/login')}
-                  className="bg-[#ff4d00] text-white font-medium px-8 py-3 rounded-full hover:bg-[#ff4d00]/90 transition-colors"
-                >
-                  Sign In
-                </button>
+        <div 
+          ref={chatContainerRef}
+          className={`
+            ${showHeader ? 'hidden' : 'flex-1 flex flex-col bg-white rounded-3xl overflow-hidden'}
+          `}
+        >
+          <div className="flex-1 overflow-auto p-4">
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl mb-4">
+                {error}
+              </div>
+            )}
+            {messages.length === 0 ? (
+              <div className="text-gray-500 text-center py-8">
+                Ask me anything!
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {messages.map((message, index) => (
+                  <div
+                    key={index}
+                    className={`flex ${message.isUser ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div
+                      className={`max-w-[80%] rounded-2xl px-8 py-4 ${
+                        message.isUser
+                          ? 'bg-[#0a1172] text-white'
+                          : 'bg-white border border-gray-200 text-[#0a1172]'
+                      }`}
+                    >
+                      <div 
+                        className="space-y-2"
+                        dangerouslySetInnerHTML={{ __html: message.text }} 
+                      />
+                    </div>
+                  </div>
+                ))}
+                {isLoading && (
+                  <div className="flex justify-start">
+                    <div className="max-w-[80%] rounded-2xl px-6 py-3 bg-white border border-gray-200">
+                      <div className="flex items-center space-x-2">
+                        <div className="w-2 h-2 bg-[#0a1172] rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                        <div className="w-2 h-2 bg-[#0a1172] rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                        <div className="w-2 h-2 bg-[#0a1172] rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          {hasReachedLimit && !session && (
+            <div className="border-t border-gray-200 bg-white p-4">
+              <div className="max-w-4xl mx-auto">
+                <div className="rounded-2xl border border-orange-200 p-6 bg-orange-50">
+                  <h2 className="text-xl font-bold text-center text-[#1a237e] mb-2">
+                    You&apos;ve reached {MESSAGE_LIMIT}-message limit!
+                  </h2>
+                  <p className="text-center text-gray-700 mb-4">
+                    Sign in for unlimited AI chat and get answers to all your study questions. 🚀
+                  </p>
+                  <div className="flex justify-center">
+                    <button
+                      onClick={() => router.push('/login')}
+                      className="bg-[#ff4d00] text-white font-medium px-6 py-2 rounded-full hover:bg-[#ff4d00]/90 transition-colors"
+                    >
+                      Sign In
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
-          ) : (
-            <>
-              {error && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl mb-4">
-                  {error}
-                </div>
-              )}
-              {messages.length === 0 ? (
-                <div className="text-gray-500 text-center py-8">
-                  Ask me anything!
-                </div>
-              ) : (
-                <div className="space-y-6">
-                  {messages.map((message, index) => (
-                    <div
-                      key={index}
-                      className={`flex ${message.isUser ? 'justify-end' : 'justify-start'}`}
-                    >
-                      <div
-                        className={`max-w-[80%] rounded-2xl px-6 py-3 ${
-                          message.isUser
-                            ? 'bg-[#0a1172] text-white'
-                            : 'bg-white border border-gray-200 text-[#0a1172]'
-                        }`}
-                      >
-                        {message.text}
-                      </div>
-                    </div>
-                  ))}
-                  {isLoading && (
-                    <div className="flex justify-start">
-                      <div className="max-w-[80%] rounded-2xl px-6 py-3 bg-white border border-gray-200">
-                        <div className="flex items-center space-x-2">
-                          <div className="w-2 h-2 bg-[#0a1172] rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                          <div className="w-2 h-2 bg-[#0a1172] rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                          <div className="w-2 h-2 bg-[#0a1172] rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </>
           )}
         </div>
 

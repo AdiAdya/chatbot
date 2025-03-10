@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@auth/core": "^0.34.2",
+    "@google/generative-ai": "^0.24.0",
     "@huggingface/inference": "^3.5.1",
     "next": "15.2.1",
     "next-auth": "^4.24.11",
