@@ -7,6 +7,7 @@ interface ChatHistoryProps {
   onNewChat: () => void;
   isSidebarOpen: boolean;
   setIsSidebarOpen: (open: boolean) => void;
+  hasReachedLimit: boolean;
 }
 
 export default function ChatHistory({
@@ -15,7 +16,8 @@ export default function ChatHistory({
   onSelect,
   onNewChat,
   isSidebarOpen,
-  setIsSidebarOpen
+  setIsSidebarOpen,
+  hasReachedLimit
 }: ChatHistoryProps) {
   return (
     <>
@@ -45,14 +47,14 @@ export default function ChatHistory({
       {/* Query History Sidebar */}
       <div 
         className={`
-          fixed lg:relative w-80 h-full
+          fixed lg:relative w-80 max-h-screen overflow-hidden
           transition-transform duration-300 ease-in-out z-40 flex flex-col
           mr-4 p-4 gap-4
           ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}
       >
         {/* Scrollable Chat History */}
-        <div className="flex-1 bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="flex-1 min-h-0 bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
           <div className="h-full overflow-y-auto">
             <div className="p-4 space-y-3">
               {history.length === 0 ? (
@@ -72,25 +74,11 @@ export default function ChatHistory({
                           : 'bg-white hover:bg-gray-50'
                       }`}
                     >
-                      <div className={`text-[15px] font-medium line-clamp-2 flex-1 ${
+                      <div className={`text-[15px] font-medium line-clamp-2 ${
                         isSelected ? 'text-white' : 'text-[#1a1a1a]'
                       }`}>
                         {item.title}
                       </div>
-                      {isSelected && (
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          fill="currentColor"
-                          className="w-6 h-6 ml-2 flex-shrink-0 text-white"
-                        >
-                          <path
-                            fillRule="evenodd"
-                            d="M16.28 11.47a.75.75 0 010 1.06l-7.5 7.5a.75.75 0 01-1.06-1.06L14.69 12 7.72 5.03a.75.75 0 011.06-1.06l7.5 7.5z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                      )}
                     </div>
                   );
                 })
@@ -103,22 +91,28 @@ export default function ChatHistory({
         <div>
           <button
             onClick={onNewChat}
-            className="w-full bg-[#0a1172] text-white rounded-full py-3 px-4 flex items-center justify-center gap-2 hover:bg-[#0a1172]/90 transition-colors shadow-sm"
+            disabled={hasReachedLimit}
+            className={`w-full rounded-full py-3 px-4 flex items-center justify-center gap-2 transition-colors shadow-sm ${
+              hasReachedLimit 
+                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                : 'bg-[#0a1172] text-white hover:bg-[#0a1172]/90'
+            }`}
           >
             <span>Start a New Chat</span>
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              fill="none"
+              width="24"
+              height="24"
               viewBox="0 0 24 24"
-              strokeWidth={2}
+              fill="none"
               stroke="currentColor"
-              className="w-5 h-5"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="w-6 h-6"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"
-              />
+              <path d="M5 12h14" />
+              <path d="m12 5 7 7-7 7" />
             </svg>
           </button>
         </div>

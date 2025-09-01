@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 
 interface ChatInputProps {
   input: string;
@@ -19,9 +19,16 @@ export default function ChatInput({
 }: ChatInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Focus the input on mount and whenever it becomes enabled
+  useEffect(() => {
+    if (!isLoading && !hasReachedLimit) {
+      inputRef.current?.focus();
+    }
+  }, [isLoading, hasReachedLimit]);
+
   return (
     <form onSubmit={onSubmit} className="w-full">
-      <div className="relative max-w-4xl mx-auto">
+      <div className="relative w-full">
         <input
           ref={inputRef}
           type="text"
@@ -40,17 +47,18 @@ export default function ChatInput({
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
-            fill="none"
+            width="24"
+            height="24"
             viewBox="0 0 24 24"
-            strokeWidth={2}
+            fill="none"
             stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
             className="w-6 h-6"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"
-            />
+            <path d="M5 12h14" />
+            <path d="m12 5 7 7-7 7" />
           </svg>
         </button>
       </div>

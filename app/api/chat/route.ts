@@ -9,12 +9,21 @@ const openai = new OpenAI({
 
 export async function POST(request: Request) {
   try {
-    const { messages } = await request.json();
+    const { messages, generateTitle } = await request.json();
 
-    const formattedMessages: ChatCompletionMessageParam[] = messages.map((msg: Message) => ({
-      role: msg.isUser ? "user" : "assistant",
-      content: msg.text
-    }));
+    const formattedMessages: ChatCompletionMessageParam[] = (messages as any[]).map((msg: any) => {
+      const parts: any[] = [{ type: 'text', text: msg.text }];
+      if (msg.attachments && msg.attachments.length > 0) {
+        for (const a of msg.attachments) {
+          if (a.kind === 'image' && a.dataUrl) {
+            parts.push({ type: 'image_url', image_url: { url: a.dataUrl } });
+          } else if (a.kind === 'document' && a.textContent) {
+            parts.push({ type: 'text', text: `Attached document (${a.name}):\n${a.textContent.slice(0, 4000)}` });
+          }
+        }
+      }
+      return { role: msg.isUser ? 'user' : 'assistant', content: parts } as any;
+    });
 
     formattedMessages.unshift({
       role: "system",
@@ -36,7 +45,25 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({ text: generatedText });
+    // Optionally generate a concise chat title for new chats
+    let generatedTitle: string | undefined = undefined;
+    if (generateTitle) {
+      try {
+        const titlePrompt: ChatCompletionMessageParam[] = [
+          { role: 'system', content: 'Generate a concise, 3-7 word title summarizing the user\'s study question. Respond with title only, no quotes.' },
+          { role: 'user', content: (messages?.find((m: any) => m.isUser)?.text || '').slice(0, 1000) }
+        ];
+        const titleCompletion = await openai.chat.completions.create({
+          model: 'gpt-3.5-turbo',
+          messages: titlePrompt,
+          temperature: 0.5,
+          max_tokens: 16
+        });
+        generatedTitle = titleCompletion.choices[0]?.message?.content?.trim();
+      } catch {}
+    }
+
+    return NextResponse.json({ text: generatedText, title: generatedTitle });
   } catch (error) {
     console.error('Error in chat API:', error);
     return NextResponse.json(

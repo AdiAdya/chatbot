@@ -12,6 +12,7 @@ import { Message as MessageType } from '../services/types';
 import { 
   ChatHistoryItem, 
   sendMessage,
+  streamMessage,
   saveChatHistory,
   loadChatHistory,
   saveMessageCount,
@@ -41,7 +42,17 @@ export default function Chat() {
     const savedQueryCount = loadMessageCount();
     
     if (savedHistory) {
-      setChatHistory(savedHistory);
+      const sorted = [...savedHistory].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      setChatHistory(sorted);
+      if (sorted.length > 0) {
+        setSelectedChatIndex(0);
+        const threadMessages: MessageType[] = sorted[0].messages.flatMap(msg => [
+          { text: msg.question, isUser: true },
+          { text: msg.answer, isUser: false }
+        ]);
+        setMessages(threadMessages);
+        setShowHeader(false);
+      }
     }
 
     if (savedQueryCount) {
@@ -65,11 +76,12 @@ export default function Chat() {
       const savedHistory = loadChatHistory();
       if (savedHistory) {
         try {
-          setChatHistory(savedHistory);
+          const sorted = [...savedHistory].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+          setChatHistory(sorted);
           
           // If there's a selected chat, load its messages
-          if (selectedChatIndex !== null && savedHistory[selectedChatIndex]) {
-            const selectedChat = savedHistory[selectedChatIndex];
+          if (selectedChatIndex !== null && sorted[selectedChatIndex]) {
+            const selectedChat = sorted[selectedChatIndex];
             const threadMessages: MessageType[] = selectedChat.messages.flatMap(msg => [
               { text: msg.question, isUser: true },
               { text: msg.answer, isUser: false }
@@ -123,16 +135,30 @@ export default function Chat() {
     setError(null);
 
     try {
-      const response = await sendMessage([...messages, userMessage]);
-      const aiMessage: MessageType = { text: response, isUser: false };
-      setMessages(prev => [...prev, aiMessage]);
+      // Streaming: create placeholder assistant message and append deltas
+      const assistantIndexRef = { index: -1 };
+      setMessages((prev) => {
+        const next = [...prev, { text: '', isUser: false }];
+        assistantIndexRef.index = next.length - 1;
+        return next;
+      });
+
+      await streamMessage([...messages, userMessage], (delta) => {
+        setMessages((prev) => {
+          const next = [...prev];
+          const idx = assistantIndexRef.index >= 0 ? assistantIndexRef.index : next.length - 1;
+          const current = next[idx] || { text: '', isUser: false };
+          next[idx] = { ...current, text: current.text + delta };
+          return next;
+        });
+      });
       setQueryCount(prev => prev + 1);
 
       // Update chat history
       setChatHistory(prev => {
         const newMessage = {
           question: input,
-          answer: response,
+          answer: (messages.concat({ text: '', isUser: false }).at(-1)?.text || ''),
           timestamp: new Date()
         };
 
@@ -141,7 +167,7 @@ export default function Chat() {
         if (prev.length === 0) {
           updatedHistory = [{
             id: Math.random().toString(36).substring(7),
-            title: input.slice(0, 50) + (input.length > 50 ? '...' : ''),
+            title: (response.title?.trim() || input.slice(0, 50) + (input.length > 50 ? '...' : '')),
             messages: [newMessage],
             timestamp: new Date()
           }];
@@ -152,7 +178,7 @@ export default function Chat() {
             index === prev.length - 1 ? {
               ...chat,
               messages: [...chat.messages, newMessage],
-              title: input.slice(0, 50) + (input.length > 50 ? '...' : ''),
+              title: (response.title?.trim() || input.slice(0, 50) + (input.length > 50 ? '...' : '')),
               timestamp: new Date()
             } : chat
           );
@@ -166,7 +192,7 @@ export default function Chat() {
               index === prev.length - 1 ? {
                 ...chat,
                 messages: [...chat.messages, newMessage],
-                title: input.slice(0, 50) + (input.length > 50 ? '...' : ''),
+                title: (response.title?.trim() || input.slice(0, 50) + (input.length > 50 ? '...' : '')),
                 timestamp: new Date()
               } : chat
             );
@@ -183,11 +209,13 @@ export default function Chat() {
           }
         }
 
-        return updatedHistory;
+        // Sort by most recent first
+        const sorted = [...updatedHistory].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        return sorted;
       });
 
-      // Set the index of the current chat as selected
-      setSelectedChatIndex(chatHistory.length);
+      // Always select the most recent chat (top of the list)
+      setSelectedChatIndex(0);
     } catch (error) {
       console.error('Error:', error);
       setError(error instanceof Error ? error.message : 'An unexpected error occurred');
@@ -252,6 +280,7 @@ export default function Chat() {
           onNewChat={clearChat}
           isSidebarOpen={isSidebarOpen}
           setIsSidebarOpen={setIsSidebarOpen}
+          hasReachedLimit={hasReachedLimit}
         />
       </div>
 
