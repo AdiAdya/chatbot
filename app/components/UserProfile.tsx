@@ -26,6 +26,11 @@ export default function UserProfile({ session, onSignOut }: UserProfileProps) {
             )}
             <span className="text-sm font-medium text-gray-700">
               {session.user?.name}
+              {(session.user as any)?.isPremium && (
+                <span className="ml-2 px-2 py-1 text-xs bg-gradient-to-r from-yellow-400 to-orange-500 text-white rounded-full font-semibold">
+                  {(session.user as any)?.stripeStatus === 'TRIAL' ? 'TRIAL' : 'PREMIUM'}
+                </span>
+              )}
             </span>
           </div>
           <div className="flex items-center gap-2">

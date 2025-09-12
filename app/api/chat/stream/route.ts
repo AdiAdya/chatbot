@@ -9,8 +9,8 @@ export async function POST(request: Request) {
 
   const formatted: ChatCompletionMessageParam[] = [
     { role: 'system', content: 'You are a helpful AI tutor.' },
-    ...(messages as any[]).map((m: any) => {
-      const parts: any[] = [{ type: 'text', text: m.text }];
+    ...(messages as Message[]).map((m: Message) => {
+      const parts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [{ type: 'text', text: m.text }];
       if (m.attachments && m.attachments.length > 0) {
         for (const a of m.attachments) {
           if (a.kind === 'image' && a.dataUrl) {
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
           }
         }
       }
-      return { role: m.isUser ? 'user' : 'assistant', content: parts } as any;
+      return { role: m.isUser ? 'user' : 'assistant', content: parts } as ChatCompletionMessageParam;
     }),
   ];
 
@@ -43,12 +43,12 @@ export async function POST(request: Request) {
           stream: true,
         });
         for await (const part of completion) {
-          const delta = (part as any)?.choices?.[0]?.delta?.content || '';
+          const delta = (part as { choices?: Array<{ delta?: { content?: string } }> })?.choices?.[0]?.delta?.content || '';
           if (delta) send({ delta });
         }
         controller.enqueue(encoder.encode('event: done\ndata: {}\n\n'));
-      } catch (e: any) {
-        send({ error: 'stream_error', message: String(e?.message || e) });
+      } catch (e: unknown) {
+        send({ error: 'stream_error', message: String(e instanceof Error ? e.message : e) });
       } finally {
         controller.close();
       }

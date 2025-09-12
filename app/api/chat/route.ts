@@ -11,8 +11,8 @@ export async function POST(request: Request) {
   try {
     const { messages, generateTitle } = await request.json();
 
-    const formattedMessages: ChatCompletionMessageParam[] = (messages as any[]).map((msg: any) => {
-      const parts: any[] = [{ type: 'text', text: msg.text }];
+    const formattedMessages: ChatCompletionMessageParam[] = (messages as Message[]).map((msg: Message) => {
+      const parts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [{ type: 'text', text: msg.text }];
       if (msg.attachments && msg.attachments.length > 0) {
         for (const a of msg.attachments) {
           if (a.kind === 'image' && a.dataUrl) {
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
           }
         }
       }
-      return { role: msg.isUser ? 'user' : 'assistant', content: parts } as any;
+      return { role: msg.isUser ? 'user' : 'assistant', content: parts } as ChatCompletionMessageParam;
     });
 
     formattedMessages.unshift({
@@ -51,7 +51,7 @@ export async function POST(request: Request) {
       try {
         const titlePrompt: ChatCompletionMessageParam[] = [
           { role: 'system', content: 'Generate a concise, 3-7 word title summarizing the user\'s study question. Respond with title only, no quotes.' },
-          { role: 'user', content: (messages?.find((m: any) => m.isUser)?.text || '').slice(0, 1000) }
+          { role: 'user', content: (messages?.find((m: Message) => m.isUser)?.text || '').slice(0, 1000) }
         ];
         const titleCompletion = await openai.chat.completions.create({
           model: 'gpt-3.5-turbo',

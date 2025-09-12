@@ -2,16 +2,16 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
-import { useRouter } from 'next/navigation';
 import Message from './Message';
 import ChatInput from './ChatInput';
 import ChatHistory from './ChatHistory';
 import UserProfile from './UserProfile';
 import LoadingIndicator from './LoadingIndicator';
+import TokenLimitMessage from './TokenLimitMessage';
 import { Message as MessageType } from '../services/types';
+import { Attachment } from '../services/types';
 import { 
   ChatHistoryItem, 
-  sendMessage,
   streamMessage,
   saveChatHistory,
   loadChatHistory,
@@ -22,9 +22,9 @@ import {
 
 export default function Chat() {
   const { data: session } = useSession();
-  const router = useRouter();
   const [messages, setMessages] = useState<MessageType[]>([]);
   const [input, setInput] = useState('');
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>([]);
@@ -35,6 +35,10 @@ export default function Chat() {
   const [showHeader, setShowHeader] = useState(true);
   const MESSAGE_LIMIT = 5;
   const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  // Check if user is premium
+  const isPremium = (session?.user as { isPremium?: boolean })?.isPremium || false;
+  const stripeStatus = (session?.user as { stripeStatus?: string })?.stripeStatus || 'FREE';
 
   // Load chat history and query count from localStorage on component mount
   useEffect(() => {
@@ -120,17 +124,22 @@ export default function Chat() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    if ((!input.trim() && attachments.length === 0) || isLoading) return;
 
-    // Check query limit for non-authenticated users
-    if (!session && queryCount >= MESSAGE_LIMIT) {
+    // Check query limit for non-premium users
+    if (!isPremium && queryCount >= MESSAGE_LIMIT) {
       setHasReachedLimit(true);
       return;
     }
 
-    const userMessage: MessageType = { text: input, isUser: true };
+    const userMessage: MessageType = { 
+      text: input, 
+      isUser: true, 
+      attachments: attachments.length > 0 ? [...attachments] : undefined 
+    };
     setMessages(prev => [...prev, userMessage]);
     setInput('');
+    setAttachments([]);
     setIsLoading(true);
     setError(null);
 
@@ -167,7 +176,7 @@ export default function Chat() {
         if (prev.length === 0) {
           updatedHistory = [{
             id: Math.random().toString(36).substring(7),
-            title: (response.title?.trim() || input.slice(0, 50) + (input.length > 50 ? '...' : '')),
+            title: input.slice(0, 50) + (input.length > 50 ? '...' : ''),
             messages: [newMessage],
             timestamp: new Date()
           }];
@@ -178,7 +187,7 @@ export default function Chat() {
             index === prev.length - 1 ? {
               ...chat,
               messages: [...chat.messages, newMessage],
-              title: (response.title?.trim() || input.slice(0, 50) + (input.length > 50 ? '...' : '')),
+              title: input.slice(0, 50) + (input.length > 50 ? '...' : ''),
               timestamp: new Date()
             } : chat
           );
@@ -192,7 +201,7 @@ export default function Chat() {
               index === prev.length - 1 ? {
                 ...chat,
                 messages: [...chat.messages, newMessage],
-                title: (response.title?.trim() || input.slice(0, 50) + (input.length > 50 ? '...' : '')),
+                title: input.slice(0, 50) + (input.length > 50 ? '...' : ''),
                 timestamp: new Date()
               } : chat
             );
@@ -234,7 +243,7 @@ export default function Chat() {
     setMessages(threadMessages);
     
     // Check if we've reached the limit based on the global query count
-    if (!session && queryCount >= MESSAGE_LIMIT) {
+    if (!isPremium && queryCount >= MESSAGE_LIMIT) {
       setHasReachedLimit(true);
     } else {
       setHasReachedLimit(false);
@@ -245,7 +254,7 @@ export default function Chat() {
   };
 
   const clearChat = () => {
-    if (!session && queryCount >= MESSAGE_LIMIT) return;
+    if (!isPremium && queryCount >= MESSAGE_LIMIT) return;
     
     setMessages([]);
     setInput('');
@@ -309,7 +318,19 @@ export default function Chat() {
                 onSubmit={handleSubmit}
                 isLoading={isLoading}
                 hasReachedLimit={hasReachedLimit}
+                isPremium={isPremium}
+                attachments={attachments}
+                onAttachmentsChange={setAttachments}
               />
+              
+              {hasReachedLimit && (
+                <TokenLimitMessage 
+                  isPremium={isPremium}
+                  messageCount={queryCount}
+                  maxMessages={MESSAGE_LIMIT}
+                  stripeStatus={stripeStatus}
+                />
+              )}
             </div>
           </div>
         )}
@@ -339,26 +360,14 @@ export default function Chat() {
               </div>
             )}
           </div>
-          {hasReachedLimit && !session && (
+          {hasReachedLimit && (
             <div className="border-t border-gray-200 bg-white p-4">
-              <div className="max-w-4xl mx-auto">
-                <div className="rounded-2xl border border-orange-200 p-6 bg-orange-50">
-                  <h2 className="text-xl font-bold text-center text-[#1a237e] mb-2">
-                    You&apos;ve reached {MESSAGE_LIMIT}-message limit!
-                  </h2>
-                  <p className="text-center text-gray-700 mb-4">
-                    Sign in for unlimited AI chat and get answers to all your study questions. 🚀
-                  </p>
-                  <div className="flex justify-center">
-                    <button
-                      onClick={() => router.push('/login')}
-                      className="bg-[#ff4d00] text-white font-medium px-6 py-2 rounded-full hover:bg-[#ff4d00]/90 transition-colors"
-                    >
-                      Sign In
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <TokenLimitMessage 
+                isPremium={isPremium}
+                messageCount={queryCount}
+                maxMessages={MESSAGE_LIMIT}
+                stripeStatus={stripeStatus}
+              />
             </div>
           )}
         </div>
@@ -371,6 +380,9 @@ export default function Chat() {
               onSubmit={handleSubmit}
               isLoading={isLoading}
               hasReachedLimit={hasReachedLimit}
+              isPremium={isPremium}
+              attachments={attachments}
+              onAttachmentsChange={setAttachments}
             />
           </div>
         )}

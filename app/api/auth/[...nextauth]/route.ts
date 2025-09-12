@@ -4,6 +4,8 @@ import { User } from "next-auth";
 
 interface ExtendedUser extends User {
   id: string;
+  isPremium?: boolean;
+  stripeStatus?: string;
 }
 
 const handler = NextAuth({
@@ -15,12 +17,45 @@ const handler = NextAuth({
         password: { label: "Password", type: "password" }
       },
       async authorize(credentials) {
-        // For demo purposes, accept any email/password combination
+        // Accept any email/password combination for demo
         if (credentials?.email && credentials?.password) {
-          return {
-            id: '1',
-            email: credentials.email,
-            name: credentials.email.split('@')[0], // Use part before @ as name
+          // Fetch real subscription status from TutorChase API
+          try {
+            const tutorChaseApiUrl = process.env.TUTORCHASE_API_URL || 'http://localhost:3000';
+            const response = await fetch(`${tutorChaseApiUrl}/api/users/subscription-status?email=${encodeURIComponent(credentials.email)}`, {
+              method: 'GET',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            });
+
+            let stripeStatus = 'FREE';
+            let isPremium = false;
+
+            if (response.ok) {
+              const userData = await response.json();
+              stripeStatus = userData.stripeStatus || 'FREE';
+              // TRIAL and PAID users get premium features
+              isPremium = stripeStatus === 'TRIAL' || stripeStatus === 'PAID';
+            }
+
+            return {
+              id: '1',
+              email: credentials.email,
+              name: credentials.email.split('@')[0], // Use part before @ as name
+              isPremium: isPremium,
+              stripeStatus: stripeStatus,
+            }
+          } catch (error) {
+            console.error('Error fetching subscription status:', error);
+            // Default to FREE if there's an error
+            return {
+              id: '1',
+              email: credentials.email,
+              name: credentials.email.split('@')[0],
+              isPremium: false,
+              stripeStatus: 'FREE',
+            }
           }
         }
         return null;
@@ -37,8 +72,17 @@ const handler = NextAuth({
     async session({ session, token }) {
       if (session?.user) {
         (session.user as ExtendedUser).id = token.sub as string;
+        (session.user as ExtendedUser).isPremium = token.isPremium as boolean;
+        (session.user as ExtendedUser).stripeStatus = token.stripeStatus as string;
       }
       return session;
+    },
+    async jwt({ token, user }) {
+      if (user) {
+        token.isPremium = (user as ExtendedUser).isPremium;
+        token.stripeStatus = (user as ExtendedUser).stripeStatus;
+      }
+      return token;
     }
   },
 });
