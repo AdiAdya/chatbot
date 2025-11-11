@@ -17,11 +17,14 @@ const handler = NextAuth({
         password: { label: "Password", type: "password" }
       },
       async authorize(credentials) {
+        console.log('Authorize called with:', credentials?.email);
         // Accept any email/password combination for demo
         if (credentials?.email && credentials?.password) {
           // Fetch real subscription status from TutorChase API
           try {
             const tutorChaseApiUrl = process.env.TUTORCHASE_API_URL || 'http://localhost:3000';
+            console.log('Fetching subscription status from:', `${tutorChaseApiUrl}/api/users/subscription-status?email=${encodeURIComponent(credentials.email)}`);
+            
             const response = await fetch(`${tutorChaseApiUrl}/api/users/subscription-status?email=${encodeURIComponent(credentials.email)}`, {
               method: 'GET',
               headers: {
@@ -39,25 +42,30 @@ const handler = NextAuth({
               isPremium = stripeStatus === 'TRIAL' || stripeStatus === 'PAID';
             }
 
-            return {
+            const user = {
               id: '1',
               email: credentials.email,
               name: credentials.email.split('@')[0], // Use part before @ as name
               isPremium: isPremium,
               stripeStatus: stripeStatus,
-            }
+            };
+            console.log('Returning user:', user);
+            return user;
           } catch (error) {
             console.error('Error fetching subscription status:', error);
             // Default to FREE if there's an error
-            return {
+            const user = {
               id: '1',
               email: credentials.email,
               name: credentials.email.split('@')[0],
               isPremium: false,
               stripeStatus: 'FREE',
-            }
+            };
+            console.log('Returning default user:', user);
+            return user;
           }
         }
+        console.log('No credentials provided');
         return null;
       }
     }),

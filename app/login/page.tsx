@@ -13,8 +13,10 @@ export default function Login() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    console.log('Login form submitted with:', { email, password });
 
     try {
+      console.log('Calling signIn...');
       const result = await signIn('credentials', {
         email,
         password,
@@ -22,11 +24,15 @@ export default function Login() {
         callbackUrl: '/'
       });
 
+      console.log('SignIn result:', result);
+
       if (result?.error) {
+        console.log('SignIn error:', result.error);
         setError('Invalid credentials');
         return;
       }
 
+      console.log('Login successful, redirecting...');
       router.replace('/');
     } catch (err) {
       console.error('Login error:', err);
