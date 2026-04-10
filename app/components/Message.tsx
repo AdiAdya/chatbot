@@ -1,5 +1,8 @@
 import { Message as MessageType } from '../services/types';
 import Image from 'next/image';
+import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 
 interface MessageProps {
   message: MessageType;
@@ -53,11 +56,15 @@ export default function Message({ message }: MessageProps) {
         )}
 
         {/* Message text */}
-        <div 
-          className="space-y-2"
-          dangerouslySetInnerHTML={{ __html: message.text }} 
-        />
+        <div className="prose prose-sm max-w-none space-y-2 [&_.katex]:text-current">
+          <ReactMarkdown
+            remarkPlugins={[remarkMath]}
+            rehypePlugins={[rehypeKatex]}
+          >
+            {message.text}
+          </ReactMarkdown>
+        </div>
       </div>
     </div>
   );
-} 
+}

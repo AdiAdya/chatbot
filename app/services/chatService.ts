@@ -41,20 +41,6 @@ export function formatResponse(text: string): string {
     return key + '\n';
   });
 
-  // Convert simple LaTeX-style inline markers to readable text
-  normalized = normalized
-    .replace(/\\\(/g, '(')
-    .replace(/\\\)/g, ')')
-    .replace(/\\\[/g, '(')
-    .replace(/\\\]/g, ')')
-    .replace(/\\theta/g, 'θ')
-    .replace(/\\pi/g, 'π')
-    .replace(/\\sin/g, 'sin')
-    .replace(/\\cos/g, 'cos')
-    .replace(/\\tan/g, 'tan')
-    .replace(/\\\\/g, '\\')
-    .replace(/\\([a-zA-Z])/g, '$1');
-
   let html = normalized
     .replace(/^######\s?(.*)$/gim, '<h6>$1</h6>')
     .replace(/^#####\s?(.*)$/gim, '<h5>$1</h5>')

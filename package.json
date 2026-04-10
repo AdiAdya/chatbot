@@ -12,11 +12,15 @@
     "@auth/core": "^0.34.2",
     "@google/generative-ai": "^0.24.0",
     "@huggingface/inference": "^3.5.1",
+    "katex": "^0.16.45",
     "next": "15.2.1",
     "next-auth": "^4.24.11",
     "openai": "^4.86.2",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-math": "^6.0.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
